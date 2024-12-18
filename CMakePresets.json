@@ -1,0 +1,13 @@
+{
+	"version": 3,
+	"configurePresets": [
+		{
+			"name": "all-tests",
+			"description": "Enable samples but only those without extra dependencies.",
+			"cacheVariables": {
+				"BUILD_BENCHMARKS": true,
+				"BUILD_TESTS": true
+			}
+		}
+	]
+}

@@ -1,0 +1,6 @@
+out
+.vs
+cmake-*
+docs
+assets
+CMakeSettings.json
