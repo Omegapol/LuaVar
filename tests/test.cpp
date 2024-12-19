@@ -308,13 +308,14 @@ TEST_CASE("Basic func")
         }
         SECTION("func without arguments - return not enough ints - multi return value mode")
         {
+            // if lua returns fewer results than expected, other expected results has default values
             auto func = LuaVar::LuaFunction<std::tuple<int,int,int,int,int>(*)(), LuaVar::LuaFlags<
                 LuaVar::LuaCallDefaultMode | LuaVar::LuaVariableValueCountReturned> >("func");
             luaL_dostring(L, "function func() return 5, 10; end");
             auto res = func(L);
             REQUIRE(std::get<0>(res) == 5);
             REQUIRE(std::get<1>(res) == 10);
-            REQUIRE(std::get<2>(res) == 15);
+            REQUIRE(std::get<2>(res) == 0);
         }
         SECTION("func without arguments - return too many ints - multi return value mode")
         {
