@@ -288,6 +288,13 @@ TEST_CASE("Basic func")
             auto res = func(L);
             REQUIRE(res == 5);
         }
+        SECTION("func without arguments - void return")
+        {
+            auto func = LuaVar::LuaFunction<void(*)()>("func");
+            luaL_dostring(L, "function func() return 5; end");
+            func(L);
+            STATIC_REQUIRE(std::is_same_v<decltype(func(L)), void>);
+        }
         SECTION("func without arguments - return single int - multi return value mode")
         {
             auto func = LuaVar::LuaFunction<std::tuple<int>(*)(), LuaVar::LuaFlags<

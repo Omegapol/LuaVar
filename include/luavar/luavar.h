@@ -41,6 +41,18 @@ namespace LuaVar
         LuaVariableValueCountReturned = 0b00100
     };
 
+    template<int _flags>
+    class LuaFlags
+    {
+    public:
+        static constexpr int LuaFlagsValue = _flags;
+        LuaFlags() = default;
+    };
+
+    template<typename T>
+    concept LuaFlagsT = requires { T::LuaFlagsValue; };
+
+
     namespace Internal
     {
         template<::std::size_t I = 0,
@@ -162,49 +174,6 @@ namespace LuaVar
         };
 
 
-        // template<typename Ret, int flags, typename... Types>
-        // struct FunctorDescriptor<Ret (*)(Types...), flags>
-        // {
-        //     using ReturnType = Ret;
-        //     using Arguments = std::tuple<Types...>;
-        //     static const int CallMode = flags;
-        //
-        //     static int call(lua_State *L, Ret (*functor)(Types...))
-        //     {
-        //         Arguments items;
-        //         // gather arguments from lua stack and push them into `items` structure
-        //         auto b = populate_arguments(L, items);
-        //
-        //         if (!b)
-        //         {
-        //             if constexpr (flags & LuaCallSoftError)
-        //             {
-        //                 printf("Invalid arguments provided\n");
-        //                 fflush(stdout);
-        //                 return 0;
-        //             } else
-        //             {
-        //                 // luaL_error(L, "Invalid arguments");
-        //                 return -1;
-        //             }
-        //         }
-        //
-        //         if constexpr (std::is_same_v<ReturnType, void>)
-        //         {
-        //             // Functor is of void return type, just call it
-        //             std::apply(functor, items);
-        //         } else
-        //         {
-        //             ReturnType res;
-        //             // Functor is of non-void return type, call and assign result
-        //             res = std::apply(functor, items);
-        //             push_result(L, res);
-        //         }
-        //         return 1;
-        //     }
-        // };
-
-
         template<typename T, T functor, typename K>
         struct Binder
         {
@@ -235,6 +204,69 @@ namespace LuaVar
             using FuncType = decltype(functor);
             Binder<decltype(functor), functor, FunctorDescriptor<FuncType, flags> >::bind(L, name);
         };
+
+        template<LuaFlagsT Flags, typename _RetType>
+        struct LuaReturnParser
+        {
+            using RetType = _RetType;
+            using PackedType = std::tuple<RetType>;
+
+            constexpr static int ReturnedValuesCount()
+            {
+                if constexpr (std::is_same_v<_RetType, void>)
+                    return 0;
+                return 1;
+            }
+
+            inline static RetType GetResults(lua_State *L)
+            {
+                PackedType res;
+                Internal::populate_arguments(L, res);
+                return std::get<0>(res);
+            }
+        };
+
+        template<LuaFlagsT Flags, typename... Args>
+        struct LuaReturnParser<Flags, std::tuple<Args...> >
+        {
+            using RetType = std::tuple<Args...>;
+            using PackedType = RetType;
+
+            constexpr static int ReturnedValuesCount()
+            {
+                if constexpr (Flags::LuaFlagsValue & LuaVariableValueCountReturned)
+                {
+                    return LUA_MULTRET;
+                } else
+                {
+                    return sizeof...(Args);
+                }
+            }
+
+            inline static RetType GetResults(lua_State *L)
+            {
+                PackedType res;
+                Internal::populate_arguments(L, res);
+                return res;
+            }
+        };
+
+        template<LuaFlagsT Flags>
+        struct LuaReturnParser<Flags, void>
+        {
+            using RetType = void;
+            using PackedType = RetType;
+
+            constexpr static int ReturnedValuesCount()
+            {
+                //don't bother getting any results if we won't return any
+                return 0;
+            }
+
+            inline static RetType GetResults(lua_State */*L*/)
+            {
+            }
+        };
     }
 
     /**
@@ -262,17 +294,6 @@ namespace LuaVar
     struct Caller
     {
     };
-#pragma region istuple //todo: move this to separate header and make it configurable
-    template<typename T>
-    struct is_tuple : std::false_type
-    {
-    };
-
-    template<typename... Ts>
-    struct is_tuple<std::tuple<Ts...> > : std::true_type
-    {
-    };
-#pragma endregion
 
     template<typename RetType, int flags, typename... ArgTypes>
     struct Caller<RetType (*)(ArgTypes...), flags>
@@ -294,48 +315,13 @@ namespace LuaVar
                 luaL_checktype(L, -1, LUA_TFUNCTION);
             }
 
+            using Parser = Internal::LuaReturnParser<LuaFlags<flags>, RetType>;
             std::tuple<ArgTypes...> items(args...);
             Internal::push_arguments(L, items);
-            if constexpr (flags & LuaVariableValueCountReturned)
-            {
-                // Handle variable value count returned from LUA function
-                static_assert(is_tuple<RetType>::value, "Provided signature must return std::tuple<>");
-                // int stack_diff = lua_gettop(L);
-                lua_call(L, std::tuple_size<decltype(items)>::value, LUA_MULTRET);
-                RetType res;
-                Internal::populate_arguments(L, res);
-                return res;
-            } else
-            {
-                if constexpr (is_tuple<RetType>::value)
-                {
-                    lua_call(L, std::tuple_size<decltype(items)>::value, std::tuple_size_v<RetType>);
-                    // if return type was tuple, try to pick up all the values
-                    RetType res;
-                    Internal::populate_arguments(L, res);
-                    return res;
-                } else
-                {
-                    lua_call(L, std::tuple_size<decltype(items)>::value, 1);
-                    // pick up single value returned
-                    std::tuple<RetType> res;
-                    Internal::populate_arguments(L, res);
-                    return std::get<0>(res);
-                }
-            }
+            lua_call(L, std::tuple_size_v<decltype(items)>, Parser::ReturnedValuesCount());
+            return Parser::GetResults(L);
         }
     };
-
-    template<int _flags>
-    class LuaFlags
-    {
-    public:
-        static constexpr int LuaFlagsValue = _flags;
-        LuaFlags() = default;
-    };
-
-    template<typename T>
-    concept LuaFlagsT = requires { T::LuaFlagsValue; };
 
     /***
     * Define LUA function that can be called from C++.
