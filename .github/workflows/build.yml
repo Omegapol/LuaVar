@@ -1,0 +1,42 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  Linux:
+    runs-on: ubuntu-latest
+
+    env:
+      BUILD_TYPE: Release
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: clang
+            cxx: clang++
+            cmake_options:
+            enable_testing: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |-
+          sudo apt-get update
+          sudo apt-get install clang cmake ninja-build liblua5.4-dev catch2
+
+      - name: Configure CMake
+        run: >-
+          cmake -B Build -G Ninja --preset all-tests -Wdev -Werror=dev
+          ${{ matrix.cmake_options }}
+
+      - name: Build
+        run: cmake --build Build
+
+      - name: Test
+        if: ${{ matrix.enable_testing }}
+        working-directory: ${{github.workspace}}/Build
+        run: ctest
