@@ -47,14 +47,123 @@ namespace LuaVar
     public:
         static constexpr int LuaFlagsValue = _flags;
         LuaFlags() = default;
+
+        static constexpr bool IsSet(LuaCallFlag flag)
+        {
+            return (_flags & static_cast<int>(flag)) != 0;
+        }
+
+        static constexpr auto Set(LuaCallFlag flag)
+        {
+            return LuaFlags<_flags | static_cast<int>(flag)>{};
+        }
     };
 
     template<typename T>
     concept LuaFlagsT = requires { T::LuaFlagsValue; };
 
 
+    template<auto functor>
+        requires requires { functor(); }
+    struct Callable
+    {
+        using CallableType = decltype(functor);
+        inline static const auto _functor = functor;
+    };
+
+
+    template<typename T>
+    struct CallableDyn
+    {
+        const T _functor;
+
+        CallableDyn(const T _functor) : _functor(_functor)
+        {
+        };
+    };
+
+    template<typename T>
+    concept LuaVarFlags = requires(T t, LuaVar::LuaCallFlag flag)
+    {
+        T::LuaFlagsValue;
+        { T::LuaFlagsValue } -> std::same_as<const int &>;
+        { T::IsSet(flag) } -> std::same_as<bool>;
+    };
+
+    typedef LuaFlags<LuaCallDefaultMode> DefaultLuaVarFlags;
+
     namespace Internal
     {
+        template<typename T>
+        concept IsFunctionPointer = std::is_pointer_v<T> && std::is_function_v<std::remove_pointer_t<T> >;
+
+        template<typename T>
+        concept IsCaptureLambda = !std::is_standard_layout_v<T> ||
+                                  !std::is_trivial_v<T>;
+
+        template<typename T>
+        concept NonCaptureLambda = !IsCaptureLambda<T>;
+
+        template<typename T>
+        struct IsLuaWrappedCallableT : std::false_type
+        {
+        };
+
+        template<auto T>
+        struct IsLuaWrappedCallableT<Callable<T> > : std::true_type
+        {
+        };
+
+        template<typename T>
+        concept IsLuaWrappedCallable = (IsLuaWrappedCallableT<T>{} == true);
+
+        template<typename T>
+        struct IsLuaWrappedCallableDynT : std::false_type
+        {
+        };
+
+        template<typename T>
+        struct IsLuaWrappedCallableDynT<CallableDyn<T> > : std::true_type
+        {
+        };
+
+        template<typename T>
+        concept IsLuaWrappedCallableDyn = (IsLuaWrappedCallableDynT<T>{} == true);
+
+        template<typename T>
+        concept IsCompileTimeFunctor = (IsLuaWrappedCallable<T> == true) || NonCaptureLambda<T>;
+        //todo do proper check that it is some sort of callable
+
+        template<typename T>
+        concept IsDynamicFunctor = IsLuaWrappedCallableDyn<T> || IsCaptureLambda<T>;
+
+        template<typename T>
+        concept IsFunctor = IsDynamicFunctor<T> || IsCompileTimeFunctor<T>;
+
+        template<typename Functor>
+        using ForwardFunctor = std::conditional_t<IsDynamicFunctor<Functor>, Functor &, Functor>;
+
+        template<typename Functor>
+        struct FunctorAdapter
+        {
+            using FunctorType = Functor;
+
+            static Functor &GetFunctor(Functor &functor) { return functor; }
+        };
+
+
+        template<typename Functor>
+        struct FunctorAdapter<CallableDyn<Functor> >
+        {
+            using FunctorType = Functor;
+
+            static const FunctorType &GetFunctor(CallableDyn<Functor> &complexFunctor)
+            {
+                return complexFunctor._functor;
+            }
+        };
+
+
         template<::std::size_t I = 0,
             typename... Tp>
         inline typename ::std::enable_if<I == sizeof...(Tp), bool>::type
@@ -96,6 +205,7 @@ namespace LuaVar
         };
 
         // for pointers to member function
+        //  handles also non-capturing lambdas
         template<typename ClassType, typename ReturnType, typename... Args>
         struct function_traits<ReturnType(ClassType::*)(Args...) const>
         {
@@ -105,13 +215,13 @@ namespace LuaVar
         };
 
         // for pointers to member function
-        template<typename ClassType, typename ReturnType, typename... Args>
-        struct function_traits<ReturnType(ClassType::*)(Args...)>
-        {
-            typedef std::function<ReturnType (Args...)> f_type;
-            using arguments_type = std::tuple<Args...>;
-        };
-
+        // template<typename ClassType, typename ReturnType, typename... Args>
+        // struct function_traits<ReturnType(ClassType::*)(Args...)>
+        // {
+        //     typedef std::function<ReturnType (Args...)> f_type;
+        //     using arguments_type = std::tuple<Args...>;
+        // };
+        //
         // for function pointers
         template<typename ReturnType, typename... Args>
         struct function_traits<ReturnType (*)(Args...)>
@@ -120,25 +230,24 @@ namespace LuaVar
             using arguments_type = std::tuple<Args...>;
         };
 
-        template<typename L>
-        typename function_traits<L>::f_type make_function(L l)
-        {
-            return (typename function_traits<L>::f_type) (l);
-        }
-
-
 #pragma endregion
-        template<typename T, int flags = LuaCallDefaultMode>
+        template<typename T, LuaVarFlags flags>
         struct FunctorDescriptor
         {
-            // using Traits = CallableTraits<decltype(&T::operator())>;
-            typedef function_traits<T> Traits;
-            using ReturnType = typename Traits::f_type::result_type;
-            // using Arguments = typename Traits::test_type;
-            using Arguments = typename Traits::arguments_type;
-            static const int CallMode = flags;
+        };
 
-            static int call(lua_State *L, T functor)
+        template<IsFunctor T, LuaVarFlags flags>
+        struct FunctorDescriptor<T, flags>
+        {
+            // using Traits = CallableTraits<decltype(&T::operator())>;
+            // typedef function_traits<T> Traits;
+            typedef function_traits<std::remove_reference_t<T> > Traits;
+            using ReturnType = typename Traits::f_type::result_type;
+            using Arguments = typename Traits::arguments_type;
+            using FunctorType = std::conditional_t<IsDynamicFunctor<T>, T &, T>;
+            // use reference for dynamic functors to avoid copy
+
+            static int call(lua_State *L, FunctorType functor)
             {
                 Arguments items;
                 // gather arguments from lua stack and push them into `items` structure
@@ -146,7 +255,7 @@ namespace LuaVar
 
                 if (!b)
                 {
-                    if constexpr (flags & LuaCallSoftError)
+                    if constexpr (flags::IsSet(LuaCallSoftError))
                     {
                         printf("Invalid arguments provided\n");
                         fflush(stdout);
@@ -171,38 +280,6 @@ namespace LuaVar
                 }
                 return 1;
             }
-        };
-
-
-        template<typename T, T functor, typename K>
-        struct Binder
-        {
-            static void bind(lua_State *L, const std::string &name)
-            {
-                // create lambda that handles actual call into functor
-                auto wrapper = [](lua_State *L)
-                {
-                    int res = K::call(L, functor);
-                    if (res == -1)
-                    {
-                        lua_pushfstring(L, "Invalid arguments");
-                        // luaL_error(L, "Invalid arguments"); //todo: investigate if luaL_error can be used safely here
-                        return 1;
-                    }
-                    return res;
-                };
-
-                // assign the lambda to target name
-                lua_pushcfunction(L, wrapper);
-                lua_setglobal(L, name.c_str());
-            }
-        };
-
-        template<typename T, T functor, int flags>
-        void SimpleBind(lua_State *L, const std::string &name)
-        {
-            using FuncType = decltype(functor);
-            Binder<decltype(functor), functor, FunctorDescriptor<FuncType, flags> >::bind(L, name);
         };
 
         template<LuaFlagsT Flags, typename _RetType>
@@ -267,61 +344,300 @@ namespace LuaVar
             {
             }
         };
-    }
 
-    /**
-     * @brief Binds a C++ function to a Lua script environment with the given name.
-     *
-     * @code
-     * #The following example makes SomeFunction C++ function available under `foo` variable in LUA:
-     * LuaVar::CppBind<SomeFunction>(L, "foo");
-     * @endcode
-     *
-     * @tparam Func functor instance that will be called when triggered by LUA
-     * @param L Pointer to the Lua state.
-     * @param name The name to bind the function to in the Lua environment.
-     * @return The result of the SimpleBind operation, representing the binding.
-     */
-    template<auto Func, int flags = LuaCallDefaultMode>
-    auto CppBind(lua_State *L, const char *name)
-    {
-        // return Internal::SimpleBind<decltype(Func), Func, flags>(L, name);
-        using FuncType = decltype(Func);
-        Internal::Binder<FuncType, Func, Internal::FunctorDescriptor<FuncType, flags> >::bind(L, name);
-    }
-
-    template<typename T, int flags>
-    struct Caller
-    {
-    };
-
-    template<typename RetType, int flags, typename... ArgTypes>
-    struct Caller<RetType (*)(ArgTypes...), flags>
-    {
-        static RetType Call(const std::string &funcName, lua_State *L, ArgTypes... args)
+        static int GetAvailableId()
         {
-            auto result = lua_getglobal(L, funcName.c_str());
-            if constexpr (static_cast<bool>(flags & LuaCallSoftError))
+            static int id = 0;
+            return ++id;
+        }
+
+        template<IsDynamicFunctor Functor, LuaVarFlags flags>
+        class DynamicBind
+        {
+            using Flags = flags;
+
+            using Adapter = FunctorAdapter<Functor>;
+            using ActualFunctorType = typename Adapter::FunctorType;
+            using K = FunctorDescriptor<ActualFunctorType, flags>;
+
+            using FunctorArgType = ForwardFunctor<Functor>;
+            using ActualFunctorArgType = ForwardFunctor<ActualFunctorType>;
+
+            const char *_name;
+            ActualFunctorType functor;
+
+            struct Wrapper
             {
-                if (!lua_isfunction(L, -1))
+                ActualFunctorType functor;
+
+                explicit Wrapper(ActualFunctorArgType functor) : functor(functor)
                 {
-                    printf("global %s is not a function\n", funcName.c_str());
-                    fflush(stdout);
-                    return {};
                 }
-            } else
+
+                static int Clear(lua_State *L)
+                {
+                    Wrapper *obj = *reinterpret_cast<Wrapper **>(lua_touserdata(L, 1));
+                    delete obj;
+                    return 0;
+                }
+            };
+
+            static void bind(lua_State *L, const std::string &name, ActualFunctorArgType functor)
             {
-                assert(result); //"called function that doesn't exist!"
-                luaL_checktype(L, -1, LUA_TFUNCTION);
+                // create lambda that handles actual call into functor
+                auto wrapper = [](lua_State *L)
+                {
+                    auto *capture = *reinterpret_cast<Wrapper **>(lua_touserdata(L, lua_upvalueindex(1)));
+
+                    int res = K::call(L, capture->functor);
+                    if (res == -1)
+                    {
+                        lua_pushfstring(L, "Invalid arguments");
+                        // luaL_error(L, "Invalid arguments"); //todo: investigate if luaL_error can be used safely here
+                        return 1;
+                    }
+                    return res;
+                };
+
+                // Allocate userdata
+                auto **ud = static_cast<Wrapper **>(lua_newuserdata(L, sizeof(Wrapper*)));
+                *ud = new Wrapper(functor);
+
+                // Create and set the metatable
+                static auto id = GetAvailableId();
+                auto meta_name = std::string("Function#") + std::to_string(id);
+                if (luaL_newmetatable(L, meta_name.c_str()))
+                {
+                    // Ensure metatable is created only once
+                    lua_pushcfunction(L, Wrapper::Clear);
+                    lua_setfield(L, -2, "__gc"); // Set __gc field in the metatable
+                }
+                lua_setmetatable(L, -2);
+
+                // assign the lambda to target name
+                lua_pushcclosure(L, wrapper, 1);
+                lua_setglobal(L, name.c_str());
             }
 
-            using Parser = Internal::LuaReturnParser<LuaFlags<flags>, RetType>;
-            std::tuple<ArgTypes...> items(args...);
-            Internal::push_arguments(L, items);
-            lua_call(L, std::tuple_size_v<decltype(items)>, Parser::ReturnedValuesCount());
-            return Parser::GetResults(L);
+        public:
+            constexpr DynamicBind(char const *name, FunctorArgType functor) : _name(name),
+                                                                              functor(Adapter::GetFunctor(functor))
+            {
+            }
+
+            void Bind(lua_State *L)
+            {
+                bind(L, _name, functor);
+            }
+        };
+
+
+        template<auto functor, LuaVarFlags flags>
+        class StaticBind
+        {
+            using Flags = flags;
+            using FunctorType = decltype(functor);
+            const char *_name;
+
+        public:
+            constexpr StaticBind(char const *name, FunctorType /*functor*/) : _name(name)
+            {
+            }
+
+            void Bind(lua_State *L)
+            {
+                using K = Internal::FunctorDescriptor<FunctorType, flags>;
+                // create lambda that handles actual call into functor
+                auto wrapper = [](lua_State *L)
+                {
+                    int res = K::call(L, functor);
+                    if (res == -1)
+                    {
+                        lua_pushfstring(L, "Invalid arguments");
+                        // luaL_error(L, "Invalid arguments"); //todo: investigate if luaL_error can be used safely here
+                        return 1;
+                    }
+                    return res;
+                };
+
+                // assign the lambda to target name
+                lua_pushcfunction(L, wrapper);
+                lua_setglobal(L, _name);
+            }
+        };
+
+        template<typename T, int flags>
+        struct Caller
+        {
+        };
+
+        template<typename RetType, int flags, typename... ArgTypes>
+        struct Caller<RetType (*)(ArgTypes...), flags>
+        {
+            static RetType Call(const std::string &funcName, lua_State *L, ArgTypes... args)
+            {
+                auto result = lua_getglobal(L, funcName.c_str());
+                if constexpr (static_cast<bool>(flags & LuaCallSoftError))
+                {
+                    if (!lua_isfunction(L, -1))
+                    {
+                        printf("global %s is not a function\n", funcName.c_str());
+                        fflush(stdout);
+                        return {};
+                    }
+                } else
+                {
+                    assert(result); //"called function that doesn't exist!"
+                    luaL_checktype(L, -1, LUA_TFUNCTION);
+                }
+
+                using Parser = Internal::LuaReturnParser<LuaFlags<flags>, RetType>;
+                std::tuple<ArgTypes...> items(args...);
+                Internal::push_arguments(L, items);
+                lua_call(L, std::tuple_size_v<decltype(items)>, Parser::ReturnedValuesCount());
+                return Parser::GetResults(L);
+            }
+        };
+
+        template<typename... Args>
+        std::tuple<std::string, lua_State *, Args...> prep_args(Args... args)
+        {
+            return {"", nullptr, args...};
         }
+
+        template<typename Ret, int flags, typename... Types>
+        auto decl_impl(const char *name, lua_State *L, std::tuple<Types...> args)
+        {
+            auto t2 = std::apply<std::tuple<std::string, lua_State *, Types...> (*)(Types...)>(prep_args, args);
+            std::get<0>(t2) = name;
+            std::get<1>(t2) = L;
+            return std::apply(LuaVar::Internal::Caller<Ret (*)(Types...), flags>::Call, t2);
+        }
+    }
+
+    // /**
+    //  * @brief Binds a C++ function to a Lua script environment with the given name.
+    //  *
+    //  * @code
+    //  * #The following example makes SomeFunction C++ function available under `foo` variable in LUA:
+    //  * LuaVar::CppBind<SomeFunction>(L, "foo");
+    //  * @endcode
+    //  *
+    //  * @tparam Func functor instance that will be called when triggered by LUA
+    //  * @param L Pointer to the Lua state.
+    //  * @param name The name to bind the function to in the Lua environment.
+    //  * @return The result of the SimpleBind operation, representing the binding.
+    //  */
+    // template<auto Func, int flags = LuaCallDefaultMode>
+    // auto CppBind(lua_State *L, const char *name)
+    // {
+    //     // return Internal::SimpleBind<decltype(Func), Func, flags>(L, name);
+    //     using FuncType = decltype(Func);
+    //     Internal::Binder<FuncType, Func, Internal::FunctorDescriptor<FuncType, flags> >::bind(L, name);
+    // }
+
+
+    template<auto functor, LuaVarFlags flags = DefaultLuaVarFlags>
+    auto CppFunction(char const *name)
+    {
+        return Internal::StaticBind<functor, flags>(name, functor);
+    }
+
+    template<auto functor, LuaVarFlags flags>
+    auto CppFunction(char const *name, decltype(functor) /*e*/, flags /**/)
+    {
+        return Internal::StaticBind<functor, flags>(name, functor);
+    }
+
+    template<auto functor>
+    auto CppFunction(char const *name, decltype(functor))
+    {
+        return CppFunction<functor, DefaultLuaVarFlags>(name, functor, DefaultLuaVarFlags{});
+    }
+
+    template<Internal::IsFunctor Functor, LuaVarFlags flags>
+    auto CppFunction(char const *name, Functor &e, flags /**/) ->
+        std::enable_if_t<
+            Internal::IsCaptureLambda<Functor> && !Internal::IsLuaWrappedCallableDyn<Functor>,
+            decltype(Internal::DynamicBind<Functor, flags>(name, e))
+        >
+    {
+        static_assert(!Internal::IsFunctionPointer<Functor>,
+                      "Use function as template parameter or wrap it in LuaVar::Callable<>{}");
+
+        return Internal::DynamicBind<Functor, flags>(name, e);
+    }
+
+    template<Internal::IsFunctor Functor, LuaVarFlags flags>
+    auto CppFunction(char const *name, Functor e, flags /**/) ->
+        std::enable_if_t<Internal::IsLuaWrappedCallableDyn<Functor>,
+            decltype(Internal::DynamicBind<Functor, flags>(name, e))
+        >
+    {
+        static_assert(!Internal::IsFunctionPointer<Functor>,
+                      "Use function as template parameter or wrap it in LuaVar::Callable<>{}");
+
+        return Internal::DynamicBind<Functor, flags>(name, e);
+    }
+
+    template<typename T, typename K>
+    struct HelperWrapResult
+    {
+        using Res = void;
     };
+
+    template<auto T, LuaVarFlags flags>
+    struct HelperWrapResult<Callable<T>, flags>
+    {
+        using Res = decltype(Internal::StaticBind<Callable<T>::_functor, flags>("name", Callable<T>::_functor));
+    };
+
+
+    template<Internal::IsFunctor Functor, LuaVarFlags flags>
+    auto CppFunction(char const *name, Functor e, flags /**/) ->
+        std::enable_if_t<!Internal::IsDynamicFunctor<Functor>,
+            std::conditional_t<Internal::IsLuaWrappedCallable<Functor>,
+                typename HelperWrapResult<Functor, flags>::Res,
+                decltype(Internal::StaticBind<e, flags>(name, e))>
+        >
+    {
+        static_assert(!Internal::IsFunctionPointer<Functor>,
+                      "Use function as template parameter or wrap it in LuaVar::Callable<>{}");
+
+        if constexpr (Internal::IsLuaWrappedCallable<Functor>)
+        {
+            return Internal::StaticBind<Functor::_functor, flags>(name, Functor::_functor);
+        } else
+        {
+            return Internal::StaticBind<e, flags>(name, e);
+        }
+    }
+
+    template<Internal::IsFunctor Functor>
+    auto CppFunction(char const *name, Functor e) ->
+        std::enable_if_t<Internal::NonCaptureLambda<std::remove_reference_t<Functor>>,
+            decltype(CppFunction<Functor, DefaultLuaVarFlags>(name, e, DefaultLuaVarFlags{}))
+        >
+    {
+        return CppFunction<Functor, DefaultLuaVarFlags>(name, e, DefaultLuaVarFlags{});
+    }
+    template<Internal::IsCaptureLambda Functor>
+    auto CppFunction(char const *name, Functor& e) ->
+        std::enable_if_t<Internal::IsCaptureLambda<std::remove_reference_t<Functor>>,
+            decltype(CppFunction<Functor, DefaultLuaVarFlags>(name, e, DefaultLuaVarFlags{}))
+        >
+    {
+        return CppFunction<Functor, DefaultLuaVarFlags>(name, e, DefaultLuaVarFlags{});
+    }
+
+    template<Internal::IsCaptureLambda Functor>
+    auto CppFunction(char const *name, Functor&& e) ->
+        std::enable_if_t<Internal::IsCaptureLambda<std::remove_reference_t<Functor>>,
+            decltype(CppFunction<Functor, DefaultLuaVarFlags>(name, e, DefaultLuaVarFlags{}))
+        >
+    {
+        return CppFunction<Functor, DefaultLuaVarFlags>(name, e, DefaultLuaVarFlags{});
+    }
 
     /***
     * Define LUA function that can be called from C++.
@@ -429,7 +745,7 @@ namespace LuaVar
          */
         Ret Call(lua_State *L, Args... args)
         {
-            return decl_impl<Ret, FlagsT::LuaFlagsValue>(name, L, std::make_tuple(args...));
+            return Internal::decl_impl<Ret, FlagsT::LuaFlagsValue>(name, L, std::make_tuple(args...));
         }
 
         /**
@@ -445,64 +761,12 @@ namespace LuaVar
         }
     };
 
-    // Concept to check if a type is a function pointer
-    template<typename T>
-    concept IsFunctionPointer = std::is_pointer_v<T> && std::is_function_v<std::remove_pointer_t<T> >;
-
-    template<IsFunctionPointer Functor>
+    template<Internal::IsFunctionPointer Functor>
     LuaFunction(char const *name, Functor e) -> LuaFunction<Functor>;
-    template<IsFunctionPointer Functor, LuaFlagsT flags>
+    template<Internal::IsFunctionPointer Functor, LuaFlagsT flags>
     LuaFunction(char const *name, Functor e, flags f_) -> LuaFunction<Functor, flags>;
 }
 
-#define LuaBind(L, functor, name) LuaVar::Internal::SimpleBind<decltype(functor), functor, LuaVar::LuaCallDefaultMode>(L, name)
-#define LuaBindV(L, functor, name, flag) LuaVar::Internal::SimpleBind<decltype(functor), functor, flag>(L, name)
-#define LuaCall(L, Signature, name, ...) LuaVar::Caller<Signature, LuaVar::LuaCallDefaultMode>::Call(name, L, ##__VA_ARGS__)
-#define LuaCallV(L, Signature, name, flag, ...) LuaVar::Caller<Signature, flag>::Call(name, L, __VA_ARGS__)
-#define LuaBindA(L, functor_name) LuaBind(L, functor_name, #functor_name)
 
-
-template<typename... Args>
-std::tuple<std::string, lua_State *, Args...> prep_args(Args... args)
-{
-    return {"", nullptr, args...};
-}
-
-template<typename Ret, int flags, typename... Types>
-auto decl_impl(const char *name, lua_State *L, std::tuple<Types...> args)
-{
-    auto t2 = std::apply<std::tuple<std::string, lua_State *, Types...> (*)(Types...)>(prep_args, args);
-    std::get<0>(t2) = name;
-    std::get<1>(t2) = L;
-    return std::apply(LuaVar::Caller<Ret (*)(Types...), flags>::Call, t2);
-}
-
-#define LuaDeclareV(name, Signature, flag) LuaVar::Internal::FunctorDescriptor<Signature>::ReturnType name \
-(lua_State* L, LuaVar::Internal::FunctorDescriptor<Signature>::Arguments args) {                                            \
-    return decl_impl<LuaVar::Internal::FunctorDescriptor<Signature>::ReturnType, flag>(#name, L, args); \
-}
-
-#define LuaDeclare(name, Signature) LuaDeclareV(name, Signature, LuaVar::LuaCallDefaultMode)
-
-#define LuaDeclareB(Ret, name, ...) \
-template<typename ...Args> \
-Ret name (lua_State*L, Args... args) {           \
-    std::string _name = #name; \
-    std::tuple<Args...> arguments{args...};      \
-    static_assert(std::is_same<decltype(arguments), std::tuple<__VA_ARGS__>>(), "Invalid argument types, should be: "#__VA_ARGS__);                                \
-    return decl_impl<Ret, LuaVar::LuaCallDefaultMode>(_name.c_str(), L, arguments);         \
-}
-
-#define LuaDeclareC(Ret, name, ...) \
-Ret name (lua_State*L, std::tuple<__VA_ARGS__> args) {           \
-    std::string _name = #name; \
-    return decl_impl<Ret, LuaVar::LuaCallDefaultMode>(_name.c_str(), L, args);         \
-}
-
-#define LuaDeclareD(Ret, name, ...) \
-Ret name(lua_State* L, __VA_ARGS__) { \
-    std::string _name = #name; \
-    return decl_impl<Ret, LuaVar::LuaCallDefaultMode>(_name.c_str(), L, std::make_tuple(__VA_ARGS__)); \
-}
 
 #endif //LUAVAR_LUAVAR_H

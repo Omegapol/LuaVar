@@ -87,7 +87,7 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
         {
             lua_State *L = luaL_newstate();
             REQUIRE(L != nullptr);
-            LuaBind(L, xyzcalc, "xyzcalc");
+            LuaVar::CppFunction<xyzcalc>("xyzcalc", xyzcalc).Bind(L);
             BENCHMARK("func with 3xint arg, return int")
             {
                 luaL_dostring(L, "res = xyzcalc(3,\"somestring\",7)");
@@ -126,7 +126,7 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
         {
             lua_State *L = luaL_newstate();
             REQUIRE(L != nullptr);
-            LuaBind(L, xyzcalc, "xyzcalc");
+            LuaVar::CppFunction<xyzcalc>("xyzcalc", xyzcalc).Bind(L);
             BENCHMARK("func with 3xint arg, return int")
             {
                 luaL_dostring(L, "res = xyzcalc(3,5,7)");

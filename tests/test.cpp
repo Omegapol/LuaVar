@@ -138,6 +138,24 @@ TEST_CASE("Meta tests")
     }
 }
 
+template<typename T>
+struct IsValidCppFunction
+{
+    static constexpr bool value = requires { LuaVar::CppFunction<T>; };
+};
+
+template<auto T>
+struct IsValidCppFunctionNT
+{
+    static constexpr bool value = requires { LuaVar::CppFunction<T>; };
+};
+
+template<auto T>
+struct IsValidCallable
+{
+    static constexpr bool value = requires { typename LuaVar::Callable<T>; };
+};
+
 TEST_CASE("Basic func")
 {
     lua_State *L = luaL_newstate();
@@ -150,35 +168,78 @@ TEST_CASE("Basic func")
             // LuaBind(L, foo0, "foo0");
             // static auto vv = LuaVar::CppFunction<decltype(foo0), foo0>("foo0");
             // vv.Bind(L);
-            LuaVar::CppBind<foo0>(L, "foo0");
+            LuaVar::CppFunction<foo0>("foo0").Bind(L);
             luaL_dostring(L, "res = foo0()");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 1);
         }
+        SECTION("bind with function statically")
+        {
+            LuaVar::CppFunction<foo0>("foo0").Bind(L);
+            luaL_dostring(L, "res = foo0()");
+            lua_getglobal(L, "res");
+            REQUIRE(lua_tonumber(L, -1) == 1);
+        }
+        SECTION("bind with function statically - also provide function as arg")
+        {
+            LuaVar::CppFunction<foo0>("foo0", foo0).Bind(L);
+            luaL_dostring(L, "res = foo0()");
+            lua_getglobal(L, "res");
+            REQUIRE(lua_tonumber(L, -1) == 1);
+        }
+        SECTION("bind with function as argument dynamically")
+        {
+            LuaVar::CppFunction("foo0", LuaVar::CallableDyn{foo0}).Bind(L);
+            luaL_dostring(L, "res = foo0()");
+            lua_getglobal(L, "res");
+            REQUIRE(lua_tonumber(L, -1) == 1);
+        }
+        SECTION("bind with function as argument dynamically using flags")
+        {
+            LuaVar::CppFunction("foo0", LuaVar::CallableDyn{foo0},
+                                 LuaVar::LuaFlags<LuaVar::LuaCallDefaultMode>{}).Bind(L);
+            luaL_dostring(L, "res = foo0()");
+            lua_getglobal(L, "res");
+            REQUIRE(lua_tonumber(L, -1) == 1);
+        }
+        SECTION("bind with function as argument statically")
+        {
+            LuaVar::CppFunction("foo0", LuaVar::Callable<foo0>{}).Bind(L);
+            luaL_dostring(L, "res = foo0()");
+            lua_getglobal(L, "res");
+            REQUIRE(lua_tonumber(L, -1) == 1);
+        }
+        SECTION("fail on invalid argument")
+        {
+            STATIC_CHECK_FALSE(IsValidCppFunctionNT<1234>::value);
+            STATIC_CHECK_FALSE(IsValidCallable<1234>::value);
+            // STATIC_CHECK(IsValidCppFunctionNT<foo0>::value); //todo: create type check for CppFunction
+            STATIC_CHECK(IsValidCallable<foo0>::value);
+        }
         SECTION("func with int arg, return int")
         {
-            LuaBind(L, foo1, "foo1");
+            LuaVar::CppFunction<foo1>("foo1").Bind(L);
             luaL_dostring(L, "res = foo1(15)");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 15);
         }
         SECTION("func with 2xint arg, return int")
         {
-            LuaBind(L, foo2, "foo2");
+            LuaVar::CppFunction<foo2>("foo2").Bind(L);
             luaL_dostring(L, "res = foo2(3,7)");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 21);
         }
         SECTION("func with 3xint arg, return int")
         {
-            LuaBind(L, xyzcalc, "xyzcalc");
+            LuaVar::CppFunction<xyzcalc>("xyzcalc").Bind(L);
             luaL_dostring(L, "res = xyzcalc(3,5,7)");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 105);
         }
         SECTION("invalid argument")
         {
-            LuaBind(L, xyzcalc, "xyzcalc");
+            LuaVar::CppFunction<xyzcalc>("xyzcalc").Bind(L);
             luaL_dostring(L, "res = xyzcalc(3,\"somestring\",7)");
             lua_getglobal(L, "res");
             REQUIRE(lua_type(L, -1) == LUA_TSTRING);
@@ -187,7 +248,7 @@ TEST_CASE("Basic func")
         SECTION("func with too many arguments")
         {
             // LUA allows calling functions with more arguments than needed
-            LuaBind(L, foo1, "foo1");
+            LuaVar::CppFunction<foo1>("foo1").Bind(L);
             luaL_dostring(L, "res = foo1(100, 10, 11)");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 100);
@@ -195,7 +256,7 @@ TEST_CASE("Basic func")
         SECTION("too few arguments - missing int")
         {
             // LUA fills in any missing arguments as nones, so the integer will default to 0
-            LuaBind(L, foo1, "foo1");
+            LuaVar::CppFunction<foo1>("foo1").Bind(L);
             luaL_dostring(L, "res = foo1()");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 0);
@@ -203,7 +264,7 @@ TEST_CASE("Basic func")
         SECTION("too few arguments - missing str")
         {
             // LUA fills in any missing arguments as nones, the function will return error string
-            LuaBind(L, foo1str, "foo1str");
+            LuaVar::CppFunction<foo1str>("foo1str").Bind(L);
             luaL_dostring(L, "res = foo1str()");
             lua_getglobal(L, "res");
             auto str = lua_tostring(L, -1);
@@ -211,14 +272,14 @@ TEST_CASE("Basic func")
         }
         SECTION("func with int arg, void return")
         {
-            LuaBind(L, NoValueFoo, "NoValueFoo");
+            LuaVar::CppFunction<NoValueFoo>("NoValueFoo").Bind(L);
             luaL_dostring(L, "NoValueFoo(22)");
             CHECK(lua_isnil(L, -1));
         }
         SECTION("multiple func")
         {
-            LuaBind(L, foo0, "foo0");
-            LuaBind(L, foo1, "foo1");
+            LuaVar::CppFunction<foo0>("foo0").Bind(L);
+            LuaVar::CppFunction<foo1>("foo1").Bind(L);
             luaL_dostring(L, "res = foo1(foo0())");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 1);
@@ -231,7 +292,7 @@ TEST_CASE("Basic func")
                 {
                     return 22 + i + j;
                 };
-                LuaVar::CppBind<twointslambda>(L, "twointslambda");
+                LuaVar::CppFunction<twointslambda>("twointslambda").Bind(L);
                 luaL_dostring(L, "res = twointslambda(22, 1)");
                 lua_getglobal(L, "res");
                 REQUIRE(lua_tonumber(L, -1) == 45);
@@ -242,28 +303,249 @@ TEST_CASE("Basic func")
                 {
                     return 22 + i;
                 };
-                LuaVar::CppBind<intlambda>(L, "intlambda");
+                LuaVar::CppFunction<intlambda>("intlambda").Bind(L);
+                luaL_dostring(L, "res = intlambda(22)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 44);
+            }
+            SECTION("binding with lambda as argument")
+            {
+                auto intlambda = [](int i)
+                {
+                    return 22 + i;
+                };
+                LuaVar::CppFunction("intlambda", intlambda).Bind(L);
+                STATIC_CHECK(sizeof(intlambda) == 1);
                 luaL_dostring(L, "res = intlambda(22)");
                 lua_getglobal(L, "res");
                 REQUIRE(lua_tonumber(L, -1) == 44);
             }
         }
-        //todo: capture lambda is not supported today
-        // SECTION("capture lambda")
-        // {
-        //     SECTION("func with 2xint arg, int return")
-        //     {
-        //         int k = 10;
-        //         auto captwointslambda = [&](int i, int j)
-        //         {
-        //             return 22+i+j+k;
-        //         };
-        //         LuaVar::CppBind<captwointslambda>(L, "captwointslambda");
-        //         luaL_dostring(L, "res = captwointslambda(22, 1)");
-        //         lua_getglobal(L, "res");
-        //         REQUIRE(lua_tonumber(L, -1) == 55);
-        //     }
-        // }
+        SECTION("capture by ref lambda")
+        {
+            SECTION("func with 2xint arg, int return")
+            {
+                int k = 16;
+                auto captwointslambda = [&](int i, int j)
+                {
+                    return 22 + i + j + k;
+                };
+                LuaVar::CppFunction("captwointslambda", captwointslambda).Bind(L);
+                CHECK(captwointslambda(22,1) == 61);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 61);
+                lua_pop(L, -1);
+
+                k = 32;
+
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 77);
+                lua_pop(L, -1);
+
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                luaL_dostring(L, "captwointslambda = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+            }
+            SECTION("func with 2xint arg int return CallableDyn")
+            {
+                int k = 16;
+                auto captwointslambda = [&](int i, int j)
+                {
+                    return 22 + i + j + k;
+                };
+                LuaVar::CppFunction("captwointslambda", LuaVar::CallableDyn{captwointslambda}).Bind(L);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 61);
+                lua_pop(L, -1);
+
+                k = 32;
+
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 77);
+                lua_pop(L, -1);
+
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                luaL_dostring(L, "captwointslambda = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+            }
+            SECTION("by rvalue")
+            {
+                int k = 16;
+                LuaVar::CppFunction("captwointslambda", [&](int i, int j)
+                {
+                    return 22 + i + j + k;
+                }).Bind(L);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 61);
+                lua_pop(L, -1);
+            }
+        }
+        SECTION("capture by value lambda")
+        {
+            struct ExampleStruct
+            {
+                static int &DestructionCount()
+                {
+                    static int DestructionCount = 0;
+                    return DestructionCount;
+                }
+
+                ~ExampleStruct()
+                {
+                    ++DestructionCount();
+                }
+
+                std::string v = "yes";
+                int val = 100;
+            } some_struct;
+            ExampleStruct::DestructionCount() = 0;
+            SECTION("func with 2xint arg, int return")
+            {
+                int k = 10;
+                auto captwointslambda = [=](int i, int j)
+                {
+                    return 22 + i + j + k;
+                };
+                // LuaVar::CppBind(L, "captwointslambda", captwointslambda);
+                LuaVar::CppFunction("captwointslambda", captwointslambda).Bind(L);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 55);
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                luaL_dostring(L, "captwointslambda = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+            }
+            // check that we can use multiple lambdas at once,
+            // check if they are destroyed properly
+            // overwriting variable with new lambda should work as well
+            SECTION("multiple lambdas - different")
+            {
+                int k = 16;
+                LuaVar::CppFunction("captwointslambda", [=](int i, int j)
+                {
+                    return 22 + i + j + k;
+                }).Bind(L);
+                LuaVar::CppFunction("captwointslambda2", [=](int i, int j)
+                {
+                    return static_cast<int>(23 + some_struct.v.length() + some_struct.val + i + j);
+                }).Bind(L);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 61);
+                lua_pop(L, -1);
+                luaL_dostring(L, "res = captwointslambda2(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 149);
+                lua_pop(L, -1);
+
+                // struct destructor should be called given times because we are copying lambda around
+                auto destructions_before_gc = ExampleStruct::DestructionCount();
+                CHECK(ExampleStruct::DestructionCount() == 2);
+
+                // clear lua variables and force garbage collection
+                luaL_dostring(L, "captwointslambda = nil");
+                luaL_dostring(L, "captwointslambda2 = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                // the destructor should have been called by now, it should be called exactly once
+                CHECK((ExampleStruct::DestructionCount()-destructions_before_gc) == 1);
+
+                // bind the brand new lambda again and test it
+                LuaVar::CppFunction("captwointslambda2", [=](int i, int j)
+                {
+                    return static_cast<int>(23 + some_struct.v.length() + some_struct.val + i + j);
+                }).Bind(L);
+                luaL_dostring(L, "res = captwointslambda2(23, 2)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 151);
+                lua_pop(L, -1);
+                // struct destructor should be called given times because we are copying lambda around
+                destructions_before_gc = ExampleStruct::DestructionCount();
+                CHECK(ExampleStruct::DestructionCount() == 5);
+
+                // clear lua variable and force garbage collection
+                luaL_dostring(L, "captwointslambda2 = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                // the destructor should have been called by now, it should be called exactly once
+                CHECK((ExampleStruct::DestructionCount()-destructions_before_gc) == 1);
+            }
+            // check that same lambda instance can be bound multiple times
+            SECTION("multiple lambdas - reusing same lambda")
+            {
+                int k = 16;
+                LuaVar::CppFunction("captwointslambda", [=](int i, int j)
+                {
+                    return 22 + i + j + k;
+                }).Bind(L);
+                auto reused_lambda = [=](int i, int j)
+                {
+                    return static_cast<int>(23 + some_struct.v.length() + some_struct.val + i + j);
+                };
+                LuaVar::CppFunction("captwointslambda2", reused_lambda).Bind(L);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 61);
+                lua_pop(L, -1);
+                luaL_dostring(L, "res = captwointslambda2(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 149);
+                lua_pop(L, -1);\
+
+                // struct destructor should be called given times because we are copying lambda around
+                auto destructions_before_gc = ExampleStruct::DestructionCount();
+                CHECK(ExampleStruct::DestructionCount() == 1);
+
+                // clear lua variables and force garbage collection
+                luaL_dostring(L, "captwointslambda = nil");
+                luaL_dostring(L, "captwointslambda2 = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                // the destructor should have been called by now, it should be called exactly once
+                CHECK((ExampleStruct::DestructionCount()-destructions_before_gc) == 1);
+
+                // bind the same lambda again and test it
+                LuaVar::CppFunction("captwointslambda2", reused_lambda).Bind(L);
+                luaL_dostring(L, "res = captwointslambda2(23, 2)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 151);
+                lua_pop(L, -1);
+
+                // struct destructor should be called given times because we are copying lambda around
+                destructions_before_gc = ExampleStruct::DestructionCount();
+                CHECK(ExampleStruct::DestructionCount() == 3);
+
+                // clear lua variable and force garbage collection
+                luaL_dostring(L, "captwointslambda2 = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                // the destructor should have been called by now, it should be called exactly once
+                CHECK((ExampleStruct::DestructionCount()-destructions_before_gc) == 1);
+            }
+            SECTION("already bound lambda should still work after the source lambda goes out of scope")
+            {
+                {
+                    auto reused_lambda = [=](int i, int j)
+                    {
+                        return static_cast<int>(23 + some_struct.v.length() + some_struct.val + i + j);
+                    };
+                    LuaVar::CppFunction("captwointslambda2", reused_lambda).Bind(L);
+                }
+                luaL_dostring(L, "res = captwointslambda2(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 149);
+                lua_pop(L, -1);
+
+                auto destructions_before_gc = ExampleStruct::DestructionCount();
+                CHECK(ExampleStruct::DestructionCount() == 2);
+
+                luaL_dostring(L, "captwointslambda2 = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                // the destructor should have been called by now, it should be called exactly once
+                CHECK((ExampleStruct::DestructionCount()-destructions_before_gc) == 1);
+            }
+        }
     }
     SECTION("C++ to LUA calling")
     {
@@ -305,7 +587,7 @@ TEST_CASE("Basic func")
         }
         SECTION("func without arguments - return multiple ints - multi return value mode")
         {
-            auto func = LuaVar::LuaFunction<std::tuple<int,int,int>(*)(), LuaVar::LuaFlags<
+            auto func = LuaVar::LuaFunction<std::tuple<int, int, int>(*)(), LuaVar::LuaFlags<
                 LuaVar::LuaCallDefaultMode | LuaVar::LuaVariableValueCountReturned> >("func");
             luaL_dostring(L, "function func() return 5,10,15; end");
             auto res = func(L);
@@ -316,7 +598,7 @@ TEST_CASE("Basic func")
         SECTION("func without arguments - return not enough ints - multi return value mode")
         {
             // if lua returns fewer results than expected, other expected results has default values
-            auto func = LuaVar::LuaFunction<std::tuple<int,int,int,int,int>(*)(), LuaVar::LuaFlags<
+            auto func = LuaVar::LuaFunction<std::tuple<int, int, int, int, int>(*)(), LuaVar::LuaFlags<
                 LuaVar::LuaCallDefaultMode | LuaVar::LuaVariableValueCountReturned> >("func");
             luaL_dostring(L, "function func() return 5, 10; end");
             auto res = func(L);
@@ -326,7 +608,7 @@ TEST_CASE("Basic func")
         }
         SECTION("func without arguments - return too many ints - multi return value mode")
         {
-            auto func = LuaVar::LuaFunction<std::tuple<int,int>(*)(), LuaVar::LuaFlags<
+            auto func = LuaVar::LuaFunction<std::tuple<int, int>(*)(), LuaVar::LuaFlags<
                 LuaVar::LuaCallDefaultMode | LuaVar::LuaVariableValueCountReturned> >("func");
             luaL_dostring(L, "function func() return 5, 10, 15; end");
             auto res = func(L);
@@ -342,7 +624,8 @@ TEST_CASE("Basic func")
         }
         SECTION("func without arguments - return ints - without variable return count value mode")
         {
-            auto func = LuaVar::LuaFunction<std::tuple<int,int,int>(*)(), LuaVar::LuaFlags<LuaVar::LuaCallDefaultMode> >("func");
+            auto func = LuaVar::LuaFunction<std::tuple<int, int, int>(*)(), LuaVar::LuaFlags<
+                LuaVar::LuaCallDefaultMode> >("func");
             luaL_dostring(L, "function func() return 5, 10, 15; end");
             auto res = func(L);
             REQUIRE(std::get<0>(res) == 5);
@@ -353,6 +636,42 @@ TEST_CASE("Basic func")
     }
 }
 
+TEST_CASE("Assumptions")
+{
+    int k = 16;
+    auto captwointslambda = [&](int i, int j)
+    {
+        return 22 + i + j + k;
+    };
+    char ll2 = 'a';
+    auto captwointslambda2 = [=](int /*i*/, int /*j*/)
+    {
+        return 22 + static_cast<int>(ll2);
+    };
+    auto captwointslambda3 = [](int /*i*/, int /*j*/)
+    {
+        return 22;
+    };
+    SECTION("Capture lambda detection")
+    {
+        // STATIC_CHECK(std::is_pod_v<decltype(captwointslambda)>);
+        STATIC_CHECK(
+            !(std::is_standard_layout_v<decltype(captwointslambda)> &&
+                std::is_trivial_v<decltype(captwointslambda)>));
+
+
+        // STATIC_CHECK(std::is_pod_v<decltype(captwointslambda2)>);
+        STATIC_CHECK(
+            !(std::is_standard_layout_v<decltype(captwointslambda2)> &&
+                std::is_trivial_v<decltype(captwointslambda2)>));
+
+        // STATIC_CHECK(std::is_pod_v<decltype(captwointslambda3)>);
+        STATIC_CHECK(
+            std::is_standard_layout_v<decltype(captwointslambda3)> &&
+            std::is_trivial_v<decltype(captwointslambda3)>);
+    }
+}
+
 //todo: move to other test file
 TEST_CASE("Look for mem leaks")
 {
@@ -360,7 +679,7 @@ TEST_CASE("Look for mem leaks")
     SECTION("invalid argument")
     {
         // CrtCheckMemory check;
-        LuaBind(L, xyzcalc, "xyzcalc");
+        LuaVar::CppFunction<xyzcalc>("xyzcalc").Bind(L);
         int i = 0;
         while (i < 1000000)
         {
