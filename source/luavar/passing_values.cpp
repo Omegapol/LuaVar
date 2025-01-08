@@ -9,6 +9,21 @@ namespace LuaVar
     namespace Internal
     {
         template<>
+        bool push_result(lua_State *L, std::string &arg)
+        {
+            lua_pushstring(L, arg.c_str());
+            return true;
+        }
+
+        template<>
+        bool push_result(lua_State *L, const char* &arg)
+        {
+
+            lua_pushstring(L, arg);
+            return true;
+        }
+
+        template<>
         bool push_result(lua_State *L, double &arg)
         {
             lua_pushnumber(L, arg);

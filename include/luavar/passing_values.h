@@ -72,6 +72,10 @@ namespace LuaVar
         }
 
         template<>
+        LuaVar_API bool push_result(lua_State *L, std::string &arg);
+        template<>
+        LuaVar_API bool push_result(lua_State *L, const char* &arg);
+        template<>
         LuaVar_API bool push_result(lua_State *L, double &arg);
         template<>
         LuaVar_API bool push_result(lua_State *L, bool &arg);

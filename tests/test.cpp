@@ -136,6 +136,39 @@ TEST_CASE("Meta tests")
             REQUIRE(lua_gettop(L) == 0);
         }
     }
+    SECTION("Test pushing arguments")
+    {
+        SECTION("integer")
+        {
+            int i = 100;
+            LuaVar::Internal::push_result(L, i);
+            CHECK(lua_tonumber(L, -1) == 100);
+        }
+        SECTION("double")
+        {
+            double j = 200.0;
+            LuaVar::Internal::push_result(L, j);
+            CHECK(lua_tonumber(L, -1) == 200.0);
+        }
+        SECTION("boolean")
+        {
+            bool k = true;
+            LuaVar::Internal::push_result(L, k);
+            CHECK(lua_toboolean(L, -1));
+        }
+        SECTION("string")
+        {
+            const char *ptr = "yes";
+            LuaVar::Internal::push_result(L, ptr);
+            CHECK(std::string(lua_tostring(L, -1)) == "yes");
+        }
+        SECTION("cstring")
+        {
+            std::string str = "no";
+            LuaVar::Internal::push_result(L, str);
+            CHECK(std::string(lua_tostring(L, -1)) == "no");
+        }
+    }
 }
 
 template<typename T>
