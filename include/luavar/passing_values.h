@@ -71,6 +71,17 @@ namespace LuaVar
             return false;
         }
 
+        template <typename ... Args, std::size_t... Indices>
+        constexpr bool push_tuple_result(lua_State *L, std::tuple<Args...> &arg, std::index_sequence<Indices...>) {
+            return ((push_result(L, std::get<Indices>(arg))) && ...);
+        }
+
+        template<typename ... Args>
+        bool push_result(lua_State *L, std::tuple<Args...> &arg)
+        {
+            return push_tuple_result(L, arg, std::make_index_sequence<std::tuple_size_v<std::tuple<Args...>>>{});
+        }
+
         template<>
         LuaVar_API bool push_result(lua_State *L, std::string &arg);
         template<>

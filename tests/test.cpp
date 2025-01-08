@@ -168,6 +168,16 @@ TEST_CASE("Meta tests")
             LuaVar::Internal::push_result(L, str);
             CHECK(std::string(lua_tostring(L, -1)) == "no");
         }
+        SECTION("tuple - multiple results") {
+            auto tup = std::tuple{"yes", 123, 123.0, true};
+            LuaVar::Internal::push_result(L, tup);
+            auto res = lua_tostring(L, -4);
+            REQUIRE(res != nullptr);
+            CHECK(std::string(res) == "yes");
+            CHECK(lua_tonumber(L, -3) == 123);
+            CHECK(lua_tonumber(L, -2) == 123.0);
+            CHECK(lua_toboolean(L, -1));
+        }
     }
 }
 
