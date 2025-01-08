@@ -327,6 +327,17 @@ TEST_CASE("Basic func")
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 1);
         }
+        SECTION("integration of functions returning multiple types")
+        {
+            LuaVar::CppFunction<tupfoo>("foo_return_int_str").Bind(L);
+            luaL_dostring(L, "res1, res2 = foo_return_int_str(15)");
+            lua_getglobal(L, "res1");
+            CHECK(lua_tonumber(L, -1) == 15);
+            lua_getglobal(L, "res2");
+            auto res = lua_tostring(L, -1);
+            REQUIRE(res != nullptr);
+            CHECK(std::string(res) == "test");
+        }
         SECTION("non-capture lambda")
         {
             SECTION("func with 2xint arg, int return")

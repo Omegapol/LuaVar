@@ -140,6 +140,13 @@ namespace LuaVar
         template<typename T>
         concept IsFunctor = IsDynamicFunctor<T> || IsCompileTimeFunctor<T>;
 
+
+        template<typename T>
+        concept IsTuple = requires
+        {
+            typename std::tuple_size<T>::type;
+        };
+
         template<typename Functor>
         using ForwardFunctor = std::conditional_t<IsDynamicFunctor<Functor>, Functor &, Functor>;
 
@@ -271,14 +278,18 @@ namespace LuaVar
                 {
                     // Functor is of void return type, just call it
                     std::apply(functor, items);
+                    return 0;
                 } else
                 {
                     ReturnType res;
                     // Functor is of non-void return type, call and assign result
                     res = std::apply(functor, items);
                     push_result(L, res);
+                    if constexpr (IsTuple<ReturnType>)
+                        return std::tuple_size_v<ReturnType>;
+                    else
+                        return 1;
                 }
-                return 1;
             }
         };
 
