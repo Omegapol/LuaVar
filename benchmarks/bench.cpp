@@ -7,7 +7,8 @@
 #include <cstdint>
 #include <thread>
 
-#include "luavar/luavar.h"
+#include <luavar/luavar.h>
+#include <luavar/state.h>
 
 int xyzcalc(int x, int y, int z)
 {
@@ -66,7 +67,8 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
     {
         SECTION("Base")
         {
-            lua_State *L = luaL_newstate();
+            auto LS = LuaVar::LuaState();
+            lua_State *L = LS.Get();
 
             REQUIRE(L != nullptr);
 
@@ -80,12 +82,11 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
             };
             lua_getglobal(L, "res");
             REQUIRE(lua_type(L, -1) == LUA_TSTRING);
-
-            lua_close(L);
         }
         SECTION("LuaVar")
         {
-            lua_State *L = luaL_newstate();
+            auto LS = LuaVar::LuaState();
+            lua_State *L = LS.Get();
             REQUIRE(L != nullptr);
             LuaVar::CppFunction<xyzcalc>("xyzcalc", xyzcalc).Bind(L);
             BENCHMARK("func with 3xint arg, return int")
@@ -94,7 +95,6 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
             };
             lua_getglobal(L, "res");
             REQUIRE(lua_type(L, -1) == LUA_TSTRING);
-            lua_close(L);
         }
     }
     SECTION("Lua three int arguments passed to func")
@@ -104,7 +104,8 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
             unsigned int i = 0;
             int j = i;
             (void)j;
-            lua_State *L = luaL_newstate();
+            auto LS = LuaVar::LuaState();
+            lua_State *L = LS.Get();
 
             REQUIRE(L != nullptr);
 
@@ -119,12 +120,11 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 105);
             lua_pop(L, -1);
-
-            lua_close(L);
         }
         SECTION("LuaVar")
         {
-            lua_State *L = luaL_newstate();
+            auto LS = LuaVar::LuaState();
+            lua_State *L = LS.Get();
             REQUIRE(L != nullptr);
             LuaVar::CppFunction<xyzcalc>("xyzcalc", xyzcalc).Bind(L);
             BENCHMARK("func with 3xint arg, return int")
@@ -134,7 +134,6 @@ TEST_CASE("Benchmarks - lua2cpp", "lua2cpp")
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 105);
             lua_pop(L, -1);
-            lua_close(L);
         }
     }
 }

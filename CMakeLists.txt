@@ -18,7 +18,7 @@ set_target_properties(Lua::Lua PROPERTIES
 )
 
 set(INCLUDE_FILES include/luavar/luavar.h include/luavar/binding_utils.h include/luavar/type_traits.h include/luavar/config.h)
-set(SOURCE_FILES source/luavar/luavar.cpp source/luavar/binding_utils.cpp)
+set(SOURCE_FILES source/luavar/luavar.cpp source/luavar/binding_utils.cpp source/luavar/state.cpp)
 set(MAIN_FILE main.cpp)
 
 add_executable(LuaVar ${MAIN_FILE} ${SOURCE_FILES} ${INCLUDE_FILES})

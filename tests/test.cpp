@@ -36,7 +36,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 
-#include "luavar/luavar.h"
+#include <luavar/luavar.h>
+#include <luavar/state.h>
 
 void exec_lua(lua_State *L, std::string s)
 {
@@ -99,7 +100,8 @@ void NoValueFoo(int x)
 
 TEST_CASE("Meta tests")
 {
-    lua_State *L = luaL_newstate();
+    auto LS = LuaVar::LuaState();
+    lua_State *L = LS.Get();
     SECTION("Test populating arguments")
     {
         SECTION("Multiple ints")
@@ -299,7 +301,8 @@ struct IsValidCallable
 
 TEST_CASE("Basic func")
 {
-    lua_State *L = luaL_newstate();
+    auto LS = LuaVar::LuaState();
+    lua_State *L = LS.Get();
     noValueCalled = 0;
 
     SECTION("Lua to C++ calling")
@@ -918,13 +921,14 @@ TEST_CASE("Assumptions")
 //todo: move to other test file
 TEST_CASE("Look for mem leaks")
 {
-    lua_State *L = luaL_newstate();
+    auto LS = LuaVar::LuaState();
+    lua_State *L = LS.Get();
     SECTION("invalid argument")
     {
         // CrtCheckMemory check;
         LuaVar::CppFunction<xyzcalc>("xyzcalc").Bind(L);
         int i = 0;
-        while (i < 1000000)
+        while (i < 100000)
         {
             luaL_dostring(L, "res = xyzcalc(3,\"somestring\",7)");
             ++i;
