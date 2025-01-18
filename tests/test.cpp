@@ -621,6 +621,26 @@ TEST_CASE("Basic func")
                 luaL_dostring(L, "captwointslambda = nil");
                 lua_gc(L, LUA_GCCOLLECT, 0);
             }
+            SECTION("mutable lambda")
+            {
+                int k = 10;
+                auto captwointslambda = [=](int i, int j) mutable
+                {
+                    k += 1;
+                    return 22 + i + j + k;
+                };
+                LuaVar::CppFunction("captwointslambda", captwointslambda).Bind(L);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 56);
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                luaL_dostring(L, "res = captwointslambda(22, 1)");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 57);
+                lua_gc(L, LUA_GCCOLLECT, 0);
+                luaL_dostring(L, "captwointslambda = nil");
+                lua_gc(L, LUA_GCCOLLECT, 0);
+            }
             // check that we can use multiple lambdas at once,
             // check if they are destroyed properly
             // overwriting variable with new lambda should work as well
@@ -746,6 +766,28 @@ TEST_CASE("Basic func")
                 // the destructor should have been called by now, it should be called exactly once
                 CHECK((ExampleStruct::DestructionCount()-destructions_before_gc) == 1);
             }
+        }
+        SECTION("custom callable objects") // this case is really same as mutable lambda
+        {
+            class CustomFunctor
+            {
+            public:
+                int i;
+                CustomFunctor(int i): i(i)
+                {
+                }
+
+                int operator()()  {
+                    i += 1;
+                    return i;
+                }
+            };
+            auto func = CustomFunctor{5};
+            LuaVar::CppFunction("testfunc", func).Bind(L);
+            luaL_dostring(L, "res = testfunc()");
+            lua_getglobal(L, "res");
+            REQUIRE(lua_tonumber(L, -1) == 6);
+            lua_pop(L, -1);
         }
     }
     SECTION("C++ to LUA calling")

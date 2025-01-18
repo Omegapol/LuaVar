@@ -86,12 +86,12 @@ namespace Internal {
     };
 
     // for pointers to member function
-    // template<typename ClassType, typename ReturnType, typename... Args>
-    // struct function_traits<ReturnType(ClassType::*)(Args...)>
-    // {
-    //     typedef std::function<ReturnType (Args...)> f_type;
-    //     using arguments_type = std::tuple<Args...>;
-    // };
+    template<typename ClassType, typename ReturnType, typename... Args>
+    struct type_traits<ReturnType(ClassType::*)(Args...)>
+    {
+        typedef std::function<ReturnType (Args...)> f_type;
+        using arguments_type = std::tuple<Args...>;
+    };
 
     // for function pointers
     template<typename ReturnType, typename... Args>
