@@ -17,11 +17,11 @@ set_target_properties(Lua::Lua PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${LUA_INCLUDE_DIR}"
 )
 
-set(INCLUDE_FILES include/luavar/luavar.h include/luavar/passing_values.h include/luavar/config.h)
-set(SOURCE_FILES source/luavar/luavar.cpp source/luavar/passing_values.cpp)
+set(INCLUDE_FILES include/luavar/luavar.h include/luavar/binding_utils.h include/luavar/type_traits.h include/luavar/config.h)
+set(SOURCE_FILES source/luavar/luavar.cpp source/luavar/binding_utils.cpp)
 set(MAIN_FILE main.cpp)
 
-add_executable(LuaVar ${MAIN_FILE} ${SOURCE_FILES})
+add_executable(LuaVar ${MAIN_FILE} ${SOURCE_FILES} ${INCLUDE_FILES})
 target_link_libraries(LuaVar PRIVATE Lua::Lua)
 
 if (BUILD_TESTS OR BUILD_BENCHMARKS)
@@ -30,7 +30,7 @@ endif ()
 
 if (BUILD_TESTS)
     set(TEST_FILES tests/test.cpp)
-    add_executable(tests ${SOURCE_FILES} ${TEST_FILES})
+    add_executable(tests ${SOURCE_FILES} ${INCLUDE_FILES} ${TEST_FILES})
     find_package(Catch2 CONFIG REQUIRED)
     target_link_libraries(tests PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)
     target_link_libraries(tests PRIVATE Lua::Lua)
@@ -39,7 +39,7 @@ endif ()
 
 if (BUILD_BENCHMARKS)
     set(BENCH_FILES benchmarks/bench.cpp)
-    add_executable(benchmark ${SOURCE_FILES} ${BENCH_FILES})
+    add_executable(benchmark ${SOURCE_FILES} ${INCLUDE_FILES} ${BENCH_FILES})
     find_package(Catch2 CONFIG REQUIRED)
     target_link_libraries(benchmark PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)
     target_link_libraries(benchmark PRIVATE Lua::Lua)

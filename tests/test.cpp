@@ -38,10 +38,26 @@
 
 #include "luavar/luavar.h"
 
+void exec_lua(lua_State *L, std::string s)
+{
+    if (luaL_dostring(L, s.c_str()) != LUA_OK)
+    {
+        const char *error_msg = lua_tostring(L, -1);
+        if (error_msg)
+        {
+            REQUIRE(error_msg == nullptr);
+        }
+    }
+}
 
 int foo0()
 {
     return 1;
+}
+
+int dup(int x)
+{
+    return x * 2;
 }
 
 int foo1(int x)
@@ -62,6 +78,16 @@ int foo2(int x, int y)
 int xyzcalc(int x, int y, int z)
 {
     return x * y * z;
+}
+
+int sum(int x1, int x2, int x3, int x4, int x5, int x6, int x7, int x8, int x9, int x10)
+{
+    return x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + x9 + x10;
+}
+
+std::tuple<int, std::string> tupfoo(int x)
+{
+    return {x, "test"};
 }
 
 static int noValueCalled = 0;
@@ -168,7 +194,8 @@ TEST_CASE("Meta tests")
             LuaVar::Internal::push_result(L, str);
             CHECK(std::string(lua_tostring(L, -1)) == "no");
         }
-        SECTION("tuple - multiple results") {
+        SECTION("tuple - multiple results")
+        {
             auto tup = std::tuple{"yes", 123, 123.0, true};
             LuaVar::Internal::push_result(L, tup);
             auto res = lua_tostring(L, -4);
@@ -177,6 +204,77 @@ TEST_CASE("Meta tests")
             CHECK(lua_tonumber(L, -3) == 123);
             CHECK(lua_tonumber(L, -2) == 123.0);
             CHECK(lua_toboolean(L, -1));
+        }
+    }
+    SECTION("Functor detection tests")
+    {
+        SECTION("Without arguments")
+        {
+            auto non_cap_lmbd = []() { return 1;};
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(non_cap_lmbd)>);
+            int i = 0;
+            auto cap_lmbd1 = [=]() { return i;};
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(cap_lmbd1)>);
+            auto cap_lmbd2 = [&]() { return i;};
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(cap_lmbd2)>);
+        }
+        SECTION("With arguments")
+        {
+            auto non_cap_lmbd = [](int,int,int) { return 1;};
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(non_cap_lmbd)>);
+            int i = 0;
+            auto cap_lmbd1 = [=](int,int,int) { return i;};
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(cap_lmbd1)>);
+            auto cap_lmbd2 = [&](int,int,int) { return i;};
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(cap_lmbd2)>);
+        }
+        SECTION("Return callback") {
+
+            auto callback_function = [](int x) -> auto
+            {
+                return [=](int y) -> int { return x * y * 2; };
+            };
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(callback_function)>);
+
+            auto callback_function2 = [](int x, int, int) -> auto
+            {
+                return [=](int y) -> int { return x * y * 2; };
+            };
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(callback_function2)>);
+            int l = 2;
+            auto callback_function3 = [=](int x, int, int) -> auto
+            {
+                return [=](int y) -> int { return x * y * 2 * l; };
+            };
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(callback_function3)>);
+        }
+        SECTION("Function pointers")
+        {
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(&foo0)>);
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(&foo1)>);
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(&foo1str)>);
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(&foo2)>);
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(&tupfoo)>);
+            STATIC_CHECK(LuaVar::Internal::IsFunctor<decltype(&sum)>);
+        }
+        SECTION("Callable wrappable check")
+        {
+            STATIC_CHECK(!std::is_same_v<void, LuaVar::Callable<foo0>::CallableType>);
+            STATIC_CHECK(!std::is_same_v<void, LuaVar::Callable<foo1>::CallableType>);
+            STATIC_CHECK(!std::is_same_v<void, LuaVar::Callable<foo1str>::CallableType>);
+            STATIC_CHECK(!std::is_same_v<void, LuaVar::Callable<foo2>::CallableType>);
+            STATIC_CHECK(!std::is_same_v<void, LuaVar::Callable<tupfoo>::CallableType>);
+            STATIC_CHECK(!std::is_same_v<void, LuaVar::Callable<sum>::CallableType>);
+        }
+        SECTION("Invalid functors") {
+            STATIC_CHECK(!LuaVar::Internal::IsFunctor<int&>);
+            STATIC_CHECK(!LuaVar::Internal::IsFunctor<int>);
+            STATIC_CHECK(!LuaVar::Internal::IsFunctor<int*>);
+            struct Test {};
+            STATIC_CHECK(!LuaVar::Internal::IsFunctor<Test&>);
+            STATIC_CHECK(!LuaVar::Internal::IsFunctor<Test>);
+            STATIC_CHECK(!LuaVar::Internal::IsFunctor<Test*>);
+            STATIC_CHECK(!LuaVar::Internal::IsFunctor<std::shared_ptr<Test>>);
         }
     }
 }
@@ -240,7 +338,7 @@ TEST_CASE("Basic func")
         SECTION("bind with function as argument dynamically using flags")
         {
             LuaVar::CppFunction("foo0", LuaVar::CallableDyn{foo0},
-                                 LuaVar::LuaFlags<LuaVar::LuaCallDefaultMode>{}).Bind(L);
+                                LuaVar::LuaFlags<LuaVar::LuaCallDefaultMode>{}).Bind(L);
             luaL_dostring(L, "res = foo0()");
             lua_getglobal(L, "res");
             REQUIRE(lua_tonumber(L, -1) == 1);
@@ -338,6 +436,55 @@ TEST_CASE("Basic func")
             REQUIRE(res != nullptr);
             CHECK(std::string(res) == "test");
         }
+        SECTION("function returning callback")
+        {
+            SECTION("function returning callback function lambda")
+            {
+                auto callback_function = []() -> auto
+                {
+                    return [](int x) -> int { return x * 2; };
+                };
+                LuaVar::CppFunction("callback_function", callback_function).Bind(L);
+                exec_lua(L,
+                         R"lua(
+        result_callback = callback_function()
+        res = result_callback(21)
+        )lua");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 42);
+            }
+            SECTION("function returning callback function lambda - capture")
+            {
+                auto callback_function = [](int x) -> auto
+                {
+                    return [=](int y) -> int { return x * y * 2; };
+                };
+                LuaVar::CppFunction("callback_function", callback_function).Bind(L);
+                exec_lua(L,
+                         R"lua(
+        result_callback = callback_function(4)
+        res = result_callback(21)
+        )lua");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 168);
+            }
+            SECTION("function returning callback function pointer")
+            {
+                auto callback_function = []() -> auto
+                {
+                    return &dup;
+                };
+                LuaVar::CppFunction("callback_function", callback_function).Bind(L);
+                luaL_dostring(L,
+                              R"lua(
+        result_callback = callback_function()
+        res = result_callback(21)
+        )lua");
+                lua_getglobal(L, "res");
+                REQUIRE(lua_tonumber(L, -1) == 42);
+            }
+        }
+
         SECTION("non-capture lambda")
         {
             SECTION("func with 2xint arg, int return")
